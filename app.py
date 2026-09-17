@@ -308,7 +308,90 @@ st.markdown(f'<p class="hero-subtitle">High-speed conversational intelligence po
 client = get_groq_client(api_key_input)
 if not client:
     st.warning("⚠️ **Groq API Key is required.** Please enter your API key in the sidebar to start chatting.", icon="🔑")
-    st.info("💡 You can get a free API key from the [Groq Console](https://console.groq.com/keys).")
+    st.info("💡 You can get a free API key in 10 seconds from the [Groq Console](https://console.groq.com/keys).")
+
+
+# ---------------------------------------------------------
+# Helper: Handle Chat Completion Flow
+# ---------------------------------------------------------
+def handle_chat_completion(prompt_text: str):
+    if not client:
+        st.error("❌ Please provide a valid Groq API Key in the sidebar before sending messages.", icon="🔑")
+        return
+
+    # Append and render user message
+    st.session_state.messages.append({"role": "user", "content": prompt_text})
+    with st.chat_message("user", avatar="🧑‍💻"):
+        st.markdown(prompt_text)
+
+    # Prepare messages payload including system prompt
+    api_messages = []
+    if system_prompt.strip():
+        api_messages.append({"role": "system", "content": system_prompt.strip()})
+
+    for m in st.session_state.messages:
+        api_messages.append({"role": m["role"], "content": m["content"]})
+
+    # Render Assistant Streaming Container
+    with st.chat_message("assistant", avatar="⚡"):
+        response_placeholder = st.empty()
+        full_response = ""
+        start_time = time.time()
+
+        try:
+            stream = client.chat.completions.create(
+                model=selected_model_key,
+                messages=api_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                top_p=top_p,
+                stream=True
+            )
+
+            for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        full_response += delta.content
+                        response_placeholder.markdown(full_response + "▌")
+
+            # Final render
+            response_placeholder.markdown(full_response)
+            elapsed_time = time.time() - start_time
+            st.session_state.last_response_time = elapsed_time
+
+            # Store assistant response
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+        except GroqError as ge:
+            # Remove failed user message to prevent stuck retry loop
+            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                st.session_state.messages.pop()
+            response_placeholder.empty()
+            err_msg = str(ge)
+            if "401" in err_msg or "invalid_api_key" in err_msg.lower():
+                st.error("🔑 **Invalid Groq API Key:** The key provided was rejected. Please enter a valid API key in the sidebar.", icon="⚠️")
+                st.info("💡 You can create a free API key at [Groq Console](https://console.groq.com/keys).")
+            else:
+                st.error(f"⚠️ **Groq API Error:** {err_msg}")
+        except Exception as e:
+            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                st.session_state.messages.pop()
+            response_placeholder.empty()
+            st.error(f"⚠️ **Unexpected Error:** {str(e)}")
+
+
+# ---------------------------------------------------------
+# Display Chat History
+# ---------------------------------------------------------
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
+        with st.chat_message("user", avatar="🧑‍💻"):
+            st.markdown(msg["content"])
+    elif msg["role"] == "assistant":
+        with st.chat_message("assistant", avatar="⚡"):
+            st.markdown(msg["content"])
+
 
 # ---------------------------------------------------------
 # Empty State: Starter Suggestions
@@ -327,96 +410,15 @@ if len(st.session_state.messages) == 0:
     for idx, item in enumerate(starter_prompts):
         with cols[idx]:
             if st.button(f"{item['icon']} **{item['title']}**", key=f"starter_{idx}", use_container_width=True):
-                if client:
-                    st.session_state.messages.append({"role": "user", "content": item["prompt"]})
-                    st.rerun()
-                else:
-                    st.error("Please enter a valid API key in the sidebar first.")
+                handle_chat_completion(item["prompt"])
+
 
 # ---------------------------------------------------------
-# Display Chat History
-# ---------------------------------------------------------
-for msg in st.session_state.messages:
-    if msg["role"] == "user":
-        with st.chat_message("user", avatar="🧑‍💻"):
-            st.markdown(msg["content"])
-    elif msg["role"] == "assistant":
-        with st.chat_message("assistant", avatar="⚡"):
-            st.markdown(msg["content"])
-
-# ---------------------------------------------------------
-# Handle User Input & Streaming
+# Handle User Input
 # ---------------------------------------------------------
 user_prompt = st.chat_input("Ask anything... (Shift+Enter for new line)")
-
-# Handle auto-trigger if a starter prompt was clicked
-pending_trigger = False
-if len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user":
-    if len(st.session_state.messages) == 1 or st.session_state.messages[-2]["role"] == "assistant":
-        # Check if last user message needs an assistant reply
-        pending_trigger = True
-
 if user_prompt:
-    if not client:
-        st.error("❌ Please provide a valid Groq API Key in the sidebar before sending messages.")
-    else:
-        # Append User Message
-        st.session_state.messages.append({"role": "user", "content": user_prompt})
-        with st.chat_message("user", avatar="🧑‍💻"):
-            st.markdown(user_prompt)
-        pending_trigger = True
-
-if pending_trigger and client:
-    # Prepare messages payload including system prompt
-    api_messages = []
-    if system_prompt.strip():
-        api_messages.append({"role": "system", "content": system_prompt.strip()})
-    
-    for m in st.session_state.messages:
-        api_messages.append({"role": m["role"], "content": m["content"]})
-
-    # Render Assistant Streaming Container
-    with st.chat_message("assistant", avatar="⚡"):
-        response_placeholder = st.empty()
-        full_response = ""
-        start_time = time.time()
-
-        try:
-            # Stream response from Groq
-            stream = client.chat.completions.create(
-                model=selected_model_key,
-                messages=api_messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
-                stream=True
-            )
-
-            for chunk in stream:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if delta and delta.content:
-                        full_response += delta.content
-                        response_placeholder.markdown(full_response + "▌")
-
-            # Final render without cursor
-            response_placeholder.markdown(full_response)
-            elapsed_time = time.time() - start_time
-            st.session_state.last_response_time = elapsed_time
-
-            # Store in session state
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            st.rerun()
-
-        except GroqError as ge:
-            err_msg = str(ge)
-            if "401" in err_msg or "invalid_api_key" in err_msg.lower():
-                st.error("🔑 **Invalid Groq API Key:** The key provided was rejected. Please enter a valid API key in the sidebar.", icon="⚠️")
-                st.info("💡 You can create a free API key at [Groq Console](https://console.groq.com/keys).")
-            else:
-                st.error(f"⚠️ **Groq API Error:** {err_msg}")
-        except Exception as e:
-            st.error(f"⚠️ **Unexpected Error:** {str(e)}")
+    handle_chat_completion(user_prompt)
 
 # ---------------------------------------------------------
 # Footer
