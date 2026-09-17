@@ -409,7 +409,12 @@ if pending_trigger and client:
             st.rerun()
 
         except GroqError as ge:
-            st.error(f"⚠️ **Groq API Error:** {str(ge)}")
+            err_msg = str(ge)
+            if "401" in err_msg or "invalid_api_key" in err_msg.lower():
+                st.error("🔑 **Invalid Groq API Key:** The key provided was rejected. Please enter a valid API key in the sidebar.", icon="⚠️")
+                st.info("💡 You can create a free API key at [Groq Console](https://console.groq.com/keys).")
+            else:
+                st.error(f"⚠️ **Groq API Error:** {err_msg}")
         except Exception as e:
             st.error(f"⚠️ **Unexpected Error:** {str(e)}")
 
