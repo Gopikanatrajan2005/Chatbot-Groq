@@ -298,14 +298,35 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Initialize Groq Client
-groq_client = get_groq_client(api_key_input)
+# ---------------------------------------------------------
+# Check & Connect API Key
+# ---------------------------------------------------------
+active_key = api_key_input.strip() if api_key_input else ""
+if not active_key and "custom_groq_key" in st.session_state:
+    active_key = st.session_state["custom_groq_key"]
+
+groq_client = get_groq_client(active_key)
+
 if not groq_client:
-    st.warning(
-        "⚠️ **Groq API Key is required.** Please enter your API key in the sidebar to start chatting.",
-        icon="🔑"
-    )
-    st.info("💡 You can get a free API key in 10 seconds from the [Groq Console](https://console.groq.com/keys).")
+    with st.container():
+        st.info("👋 **Welcome to Groq AI Chatbot!** Please enter your Groq API key to start chatting:")
+        k_col1, k_col2 = st.columns([3, 1])
+        with k_col1:
+            main_key_in = st.text_input(
+                "Enter Groq API Key",
+                type="password",
+                placeholder="gsk_...",
+                label_visibility="collapsed"
+            )
+        with k_col2:
+            if st.button("🚀 Connect Key", use_container_width=True):
+                if main_key_in and main_key_in.strip():
+                    st.session_state["custom_groq_key"] = main_key_in.strip()
+                    st.rerun()
+                else:
+                    st.error("Please paste your key first.")
+        st.caption("💡 Don't have a key? Get a free API key in 10 seconds from [Groq Console](https://console.groq.com/keys)")
+        st.divider()
 
 
 # ---------------------------------------------------------
