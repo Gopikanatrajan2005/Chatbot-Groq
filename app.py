@@ -2,6 +2,7 @@ import os
 import time
 import json
 from datetime import datetime
+from typing import Optional, List, Dict
 import streamlit as st
 from dotenv import load_dotenv
 from groq import Groq, GroqError
@@ -24,21 +25,18 @@ load_dotenv()
 # ---------------------------------------------------------
 st.markdown("""
 <style>
-    /* Google Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
+
     html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
-    /* Main Container Padding */
     .block-container {
         padding-top: 2rem;
         padding-bottom: 3rem;
         max-width: 950px;
     }
 
-    /* Custom Header Badge */
     .header-badge {
         display: inline-flex;
         align-items: center;
@@ -70,15 +68,6 @@ st.markdown("""
         margin-bottom: 1.5rem;
     }
 
-    /* Suggestion Cards */
-    .suggestion-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-        margin-top: 1.5rem;
-        margin-bottom: 1.5rem;
-    }
-
     .suggestion-card {
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -94,48 +83,16 @@ st.markdown("""
         background: rgba(249, 115, 22, 0.08);
     }
 
-    .suggestion-title {
-        font-weight: 600;
-        font-size: 0.9rem;
-        margin-bottom: 4px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .suggestion-desc {
-        font-size: 0.8rem;
-        color: #a1a1aa;
-        line-height: 1.3;
-    }
-
-    /* Metric pill */
-    .metric-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: rgba(249, 115, 22, 0.1);
-        border: 1px solid rgba(249, 115, 22, 0.3);
-        color: #f97316;
-        padding: 3px 10px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-
-    /* Sidebar Clean Styling */
     section[data-testid="stSidebar"] {
         border-right: 1px solid rgba(255, 255, 255, 0.08);
     }
 
-    /* Chat Messages styling */
     [data-testid="stChatMessage"] {
         padding: 1rem;
         border-radius: 12px;
         margin-bottom: 0.8rem;
     }
 
-    /* Footer styling */
     .footer-text {
         text-align: center;
         color: #71717a;
@@ -149,13 +106,23 @@ st.markdown("""
 # Session State Initialization
 # ---------------------------------------------------------
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state["messages"] = []
 
 if "last_response_time" not in st.session_state:
-    st.session_state.last_response_time = None
+    st.session_state["last_response_time"] = None
 
-if "last_prompt_tokens" not in st.session_state:
-    st.session_state.last_prompt_tokens = 0
+
+# ---------------------------------------------------------
+# Helper: Client Initializer
+# ---------------------------------------------------------
+def get_groq_client(api_key: str) -> Optional[Groq]:
+    if not api_key or not api_key.strip():
+        return None
+    try:
+        return Groq(api_key=api_key.strip())
+    except Exception:
+        return None
+
 
 # ---------------------------------------------------------
 # Sidebar Configuration
@@ -165,12 +132,12 @@ with st.sidebar:
     st.caption("Powered by Groq's Ultra-Fast LPU™ Inference Engine")
     st.divider()
 
-    # API Key Configuration (Checks environment variable or Streamlit Cloud secrets)
+    # API Key Configuration
     default_api_key = os.environ.get("GROQ_API_KEY", "")
     if not default_api_key:
         try:
             if "GROQ_API_KEY" in st.secrets:
-                default_api_key = st.secrets["GROQ_API_KEY"]
+                default_api_key = str(st.secrets["GROQ_API_KEY"])
         except Exception:
             pass
 
@@ -183,7 +150,7 @@ with st.sidebar:
     )
 
     # Model Selection
-    AVAILABLE_MODELS = {
+    AVAILABLE_MODELS: Dict[str, str] = {
         "llama-3.3-70b-versatile": "llama-3.3-70b-versatile (Flagship High Quality)",
         "llama-3.1-8b-instant": "llama-3.1-8b-instant (Ultra Fast Speed)",
         "openai/gpt-oss-120b": "gpt-oss-120b (High Reasoning & Capability)",
@@ -201,12 +168,28 @@ with st.sidebar:
     )
 
     # System Prompts Presets
-    SYSTEM_PRESETS = {
-        "🤖 Helpful Assistant": "You are a helpful, knowledgeable, and polite AI assistant. Provide clear, well-structured, and accurate responses.",
-        "💻 Expert Software Engineer": "You are a senior software engineer and architect. Provide clean, well-commented code, optimal architectures, best practices, and thorough debugging explanations.",
-        "⚡ Ultra Concise": "You are a fast and direct assistant. Keep all answers brief, direct, and straight to the point without unnecessary filler.",
-        "✍️ Creative Writer": "You are a creative writer and storyteller. Use rich, evocative language, engaging narratives, and expressive tone.",
-        "🎓 Patient Tutor": "You are an encouraging and patient educator. Break down complex topics into intuitive, easy-to-understand explanations with examples and analogies.",
+    SYSTEM_PRESETS: Dict[str, str] = {
+        "🤖 Helpful Assistant": (
+            "You are a helpful, knowledgeable, and polite AI assistant. "
+            "Provide clear, well-structured, and accurate responses."
+        ),
+        "💻 Expert Software Engineer": (
+            "You are a senior software engineer and architect. "
+            "Provide clean, well-commented code, optimal architectures, "
+            "best practices, and thorough debugging explanations."
+        ),
+        "⚡ Ultra Concise": (
+            "You are a fast and direct assistant. "
+            "Keep all answers brief, direct, and straight to the point."
+        ),
+        "✍️ Creative Writer": (
+            "You are a creative writer and storyteller. "
+            "Use rich, evocative language, engaging narratives, and expressive tone."
+        ),
+        "🎓 Patient Tutor": (
+            "You are an encouraging and patient educator. "
+            "Break down complex topics into intuitive, easy-to-understand explanations."
+        ),
         "⚙️ Custom": ""
     }
 
@@ -225,17 +208,35 @@ with st.sidebar:
     else:
         system_prompt = st.text_area(
             "System Prompt",
-            value=SYSTEM_PRESETS[preset_choice],
+            value=SYSTEM_PRESETS.get(preset_choice, ""),
             height=100
         )
 
     # Advanced Settings Accordion
     with st.expander("🛠️ Advanced Model Parameters", expanded=False):
-        temperature = st.slider("Temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05,
-                                help="Higher values make output more random, lower values more focused and deterministic.")
-        max_tokens = st.slider("Max Output Tokens", min_value=128, max_value=8192, value=4096, step=128,
-                               help="Maximum number of tokens to generate in response.")
-        top_p = st.slider("Top-p (Nucleus Sampling)", min_value=0.0, max_value=1.0, value=1.0, step=0.05)
+        temperature = st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=0.7,
+            step=0.05,
+            help="Higher values make output more random, lower values more focused."
+        )
+        max_tokens = st.slider(
+            "Max Output Tokens",
+            min_value=128,
+            max_value=8192,
+            value=4096,
+            step=128,
+            help="Maximum number of tokens to generate in response."
+        )
+        top_p = st.slider(
+            "Top-p (Nucleus Sampling)",
+            min_value=0.0,
+            max_value=1.0,
+            value=1.0,
+            step=0.05
+        )
 
     st.divider()
 
@@ -244,14 +245,14 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🗑️ Clear Chat", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.last_response_time = None
+            st.session_state["messages"] = []
+            st.session_state["last_response_time"] = None
             st.rerun()
 
     with col2:
-        # Download Chat History as JSON
-        if st.session_state.messages:
-            chat_json = json.dumps(st.session_state.messages, indent=2)
+        messages_list = st.session_state.get("messages", [])
+        if messages_list:
+            chat_json = json.dumps(messages_list, indent=2)
             st.download_button(
                 label="📥 Export JSON",
                 data=chat_json,
@@ -263,10 +264,10 @@ with st.sidebar:
             st.button("📥 Export JSON", disabled=True, use_container_width=True)
 
     # Markdown Export
-    if st.session_state.messages:
+    if messages_list:
         md_text = f"# Groq Chat Export - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         md_text += f"**Model:** {selected_model_key}\n\n---\n\n"
-        for msg in st.session_state.messages:
+        for msg in messages_list:
             role = "🧑 User" if msg["role"] == "user" else "⚡ Assistant"
             md_text += f"### {role}\n{msg['content']}\n\n"
         st.download_button(
@@ -280,19 +281,11 @@ with st.sidebar:
     # Session Stats
     st.divider()
     st.markdown("### 📊 Session Stats")
-    st.markdown(f"- **Messages:** `{len(st.session_state.messages)}`")
+    st.markdown(f"- **Messages:** `{len(messages_list)}`")
     st.markdown(f"- **Active Model:** `{selected_model_key.split('/')[-1]}`")
-    if st.session_state.last_response_time is not None:
-        st.markdown(f"- **Last Latency:** `{st.session_state.last_response_time:.2f}s`")
-
-
-# ---------------------------------------------------------
-# Helper: Client Initializer
-# ---------------------------------------------------------
-def get_groq_client(api_key: str):
-    if not api_key or not api_key.strip():
-        return None
-    return Groq(api_key=api_key.strip())
+    last_resp = st.session_state.get("last_response_time")
+    if last_resp is not None:
+        st.markdown(f"- **Last Latency:** `{last_resp:.2f}s`")
 
 
 # ---------------------------------------------------------
@@ -300,39 +293,51 @@ def get_groq_client(api_key: str):
 # ---------------------------------------------------------
 st.markdown('<div class="header-badge">⚡ Ultra Fast Inference</div>', unsafe_allow_html=True)
 st.markdown('<h1 class="hero-title">Groq AI Assistant</h1>', unsafe_allow_html=True)
-st.markdown(f'<p class="hero-subtitle">High-speed conversational intelligence powered by <b>{selected_model_key}</b></p>', unsafe_allow_html=True)
+st.markdown(
+    f'<p class="hero-subtitle">High-speed conversational intelligence powered by <b>{selected_model_key}</b></p>',
+    unsafe_allow_html=True
+)
 
-# ---------------------------------------------------------
-# Validation: Check API Key
-# ---------------------------------------------------------
-client = get_groq_client(api_key_input)
-if not client:
-    st.warning("⚠️ **Groq API Key is required.** Please enter your API key in the sidebar to start chatting.", icon="🔑")
+# Initialize Groq Client
+groq_client = get_groq_client(api_key_input)
+if not groq_client:
+    st.warning(
+        "⚠️ **Groq API Key is required.** Please enter your API key in the sidebar to start chatting.",
+        icon="🔑"
+    )
     st.info("💡 You can get a free API key in 10 seconds from the [Groq Console](https://console.groq.com/keys).")
 
 
 # ---------------------------------------------------------
 # Helper: Handle Chat Completion Flow
 # ---------------------------------------------------------
-def handle_chat_completion(prompt_text: str):
+def process_user_query(
+    prompt_text: str,
+    client: Optional[Groq],
+    model_name: str,
+    sys_prompt: str,
+    temp: float,
+    tokens: int,
+    top_p_val: float
+) -> None:
     if not client:
         st.error("❌ Please provide a valid Groq API Key in the sidebar before sending messages.", icon="🔑")
         return
 
-    # Append and render user message
-    st.session_state.messages.append({"role": "user", "content": prompt_text})
+    # Add user message to history and render
+    st.session_state["messages"].append({"role": "user", "content": prompt_text})
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt_text)
 
-    # Prepare messages payload including system prompt
-    api_messages = []
-    if system_prompt.strip():
-        api_messages.append({"role": "system", "content": system_prompt.strip()})
+    # Build conversation payload
+    api_messages: List[Dict[str, str]] = []
+    if sys_prompt and sys_prompt.strip():
+        api_messages.append({"role": "system", "content": sys_prompt.strip()})
 
-    for m in st.session_state.messages:
+    for m in st.session_state["messages"]:
         api_messages.append({"role": m["role"], "content": m["content"]})
 
-    # Render Assistant Streaming Container
+    # Render streaming response container
     with st.chat_message("assistant", avatar="⚡"):
         response_placeholder = st.empty()
         full_response = ""
@@ -340,11 +345,11 @@ def handle_chat_completion(prompt_text: str):
 
         try:
             stream = client.chat.completions.create(
-                model=selected_model_key,
-                messages=api_messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
+                model=model_name,
+                messages=api_messages,  # type: ignore
+                temperature=temp,
+                max_tokens=tokens,
+                top_p=top_p_val,
                 stream=True
             )
 
@@ -355,36 +360,36 @@ def handle_chat_completion(prompt_text: str):
                         full_response += delta.content
                         response_placeholder.markdown(full_response + "▌")
 
-            # Final render
             response_placeholder.markdown(full_response)
             elapsed_time = time.time() - start_time
-            st.session_state.last_response_time = elapsed_time
-
-            # Store assistant response
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            st.session_state["last_response_time"] = elapsed_time
+            st.session_state["messages"].append({"role": "assistant", "content": full_response})
 
         except GroqError as ge:
-            # Remove failed user message to prevent stuck retry loop
-            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-                st.session_state.messages.pop()
+            if st.session_state["messages"] and st.session_state["messages"][-1]["role"] == "user":
+                st.session_state["messages"].pop()
             response_placeholder.empty()
             err_msg = str(ge)
             if "401" in err_msg or "invalid_api_key" in err_msg.lower():
-                st.error("🔑 **Invalid Groq API Key:** The key provided was rejected. Please enter a valid API key in the sidebar.", icon="⚠️")
+                st.error(
+                    "🔑 **Invalid Groq API Key:** The key provided was rejected. "
+                    "Please check or enter a valid API key in the sidebar.",
+                    icon="⚠️"
+                )
                 st.info("💡 You can create a free API key at [Groq Console](https://console.groq.com/keys).")
             else:
                 st.error(f"⚠️ **Groq API Error:** {err_msg}")
         except Exception as e:
-            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-                st.session_state.messages.pop()
+            if st.session_state["messages"] and st.session_state["messages"][-1]["role"] == "user":
+                st.session_state["messages"].pop()
             response_placeholder.empty()
             st.error(f"⚠️ **Unexpected Error:** {str(e)}")
 
 
 # ---------------------------------------------------------
-# Display Chat History
+# Display Existing Chat Messages
 # ---------------------------------------------------------
-for msg in st.session_state.messages:
+for msg in st.session_state.get("messages", []):
     if msg["role"] == "user":
         with st.chat_message("user", avatar="🧑‍💻"):
             st.markdown(msg["content"])
@@ -396,21 +401,45 @@ for msg in st.session_state.messages:
 # ---------------------------------------------------------
 # Empty State: Starter Suggestions
 # ---------------------------------------------------------
-if len(st.session_state.messages) == 0:
+if len(st.session_state.get("messages", [])) == 0:
     st.markdown("##### 💡 Try one of these quick starters:")
-    
+
     starter_prompts = [
-        {"icon": "⚡", "title": "Explain Groq LPUs", "prompt": "Explain how Groq's Language Processing Unit (LPU) architecture achieves such high inference speeds compared to traditional GPUs."},
-        {"icon": "🐍", "title": "Python Async Code", "prompt": "Write a clean Python script demonstrating asynchronous web scraping using `asyncio` and `aiohttp` with error handling."},
-        {"icon": "🔬", "title": "Quantum Computing", "prompt": "Explain the core principles of quantum computing (superposition, entanglement, qubits) like I am 15 years old."},
-        {"icon": "🚀", "title": "Startup Pitch Idea", "prompt": "Generate 3 innovative B2B SaaS startup ideas leveraging real-time low-latency AI inference, including target audience and monetization models."}
+        {
+            "icon": "⚡",
+            "title": "Explain Groq LPUs",
+            "prompt": "Explain how Groq's Language Processing Unit (LPU) architecture achieves high inference speeds."
+        },
+        {
+            "icon": "🐍",
+            "title": "Python Async Code",
+            "prompt": "Write a clean Python script demonstrating asynchronous HTTP requests with error handling."
+        },
+        {
+            "icon": "🔬",
+            "title": "Quantum Computing",
+            "prompt": "Explain the core principles of quantum computing (superposition, qubits) simply."
+        },
+        {
+            "icon": "🚀",
+            "title": "Startup Pitch Idea",
+            "prompt": "Generate 3 innovative B2B SaaS startup ideas leveraging real-time low-latency AI inference."
+        }
     ]
 
     cols = st.columns(len(starter_prompts))
     for idx, item in enumerate(starter_prompts):
         with cols[idx]:
             if st.button(f"{item['icon']} **{item['title']}**", key=f"starter_{idx}", use_container_width=True):
-                handle_chat_completion(item["prompt"])
+                process_user_query(
+                    prompt_text=item["prompt"],
+                    client=groq_client,
+                    model_name=selected_model_key,
+                    sys_prompt=system_prompt,
+                    temp=temperature,
+                    tokens=max_tokens,
+                    top_p_val=top_p
+                )
 
 
 # ---------------------------------------------------------
@@ -418,7 +447,15 @@ if len(st.session_state.messages) == 0:
 # ---------------------------------------------------------
 user_prompt = st.chat_input("Ask anything... (Shift+Enter for new line)")
 if user_prompt:
-    handle_chat_completion(user_prompt)
+    process_user_query(
+        prompt_text=user_prompt,
+        client=groq_client,
+        model_name=selected_model_key,
+        sys_prompt=system_prompt,
+        temp=temperature,
+        tokens=max_tokens,
+        top_p_val=top_p
+    )
 
 # ---------------------------------------------------------
 # Footer
