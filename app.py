@@ -163,7 +163,7 @@ with st.sidebar:
     selected_model_key = st.selectbox(
         "AI Model",
         options=list(AVAILABLE_MODELS.keys()),
-        format_func=lambda x: AVAILABLE_MODELS.get(x, x),
+        format_func=lambda x: str(AVAILABLE_MODELS.get(str(x), str(x))),
         index=0
     )
 
